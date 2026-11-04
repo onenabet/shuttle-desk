@@ -64,10 +64,10 @@ async function loadState() {
   const signout=document.createElement('button');signout.className='btn secondary';signout.textContent='יציאה';signout.onclick=async()=>{await supabase.auth.signOut();activeUser=null;revision=null;loginScreen()};
   const top=document.querySelector('.topright');top.querySelector('#logout-button')?.remove();signout.id='logout-button';top.append(signout);
   top.querySelector('#create-account-button')?.remove();
+  top.querySelector('#import-data-button')?.remove();
   if (data.role==='manager') {
     const create=document.createElement('button');create.id='create-account-button';create.className='btn ghost';create.textContent='＋ משתמש';
     create.onclick=()=>openUserForm('driver');top.append(create);
-    top.querySelector('#import-data-button')?.remove();
     const importer=document.createElement('button');importer.id='import-data-button';importer.className='btn secondary';importer.textContent='↑ ייבוא נתונים';importer.onclick=importShuttleData;top.append(importer);
   }
   status('✓ מסונכרן עם השרת');
