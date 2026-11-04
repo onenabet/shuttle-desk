@@ -20,7 +20,8 @@ export async function onRequestPost({request,env}) {
      typeof phone!=='string'||!/^\+[1-9]\d{7,14}$/.test(phone)||
      typeof password!=='string'||password.length<8||password.length>128)
     return json({error:'Invalid details'},400);
-  const {data:created,error:createError}=await admin.auth.admin.createUser({phone,password,phone_confirm:true,user_metadata:{name:name.trim()}});
+  const email=`p${phone.replace(/\D/g,'')}@shuttledesk.example.com`;
+  const {data:created,error:createError}=await admin.auth.admin.createUser({email,password,email_confirm:true,user_metadata:{name:name.trim()}});
   if(createError)return json({error:'Could not create manager'},400);
   const {error:profileError}=await admin.from('app_profiles').insert({id:created.user.id,phone,name:name.trim(),role:'manager'});
   if(profileError){await admin.auth.admin.deleteUser(created.user.id);return json({error:'Could not save manager'},500)}

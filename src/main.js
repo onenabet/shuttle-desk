@@ -5,6 +5,9 @@ const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_Tdu
 const supabase = createClient(url, key, {auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false}});
 const APP_CACHE = 'shuttle-desk-demo-v1';
 const PENDING = 'shuttle-pending-v2';
+// Authentication uses confirmed internal email aliases, never SMS.
+// Phone numbers remain the only identifiers shown to users.
+const phoneEmail=phone=>`p${phone.replace(/\D/g,'')}@shuttledesk.example.com`;
 
 let activeUser = null;
 let revision = null;
@@ -41,7 +44,7 @@ async function login(event) {
   const button=form.querySelector('button');button.disabled=true;button.textContent='מתחבר...';
   const phone=form.elements.phone.value.replace(/[\s()-]/g,'');
   const password=form.elements.password.value;
-  const {error}=await supabase.auth.signInWithPassword({phone,password});
+  const {error}=await supabase.auth.signInWithPassword({email:phoneEmail(phone),password});
   button.disabled=false;button.textContent='כניסה למערכת';
   if (error) return loginScreen('מספר טלפון או קוד אישי שגויים, או שהחשבון טרם הופעל');
   await loadState();
