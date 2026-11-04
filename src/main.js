@@ -67,6 +67,8 @@ async function loadState() {
   if (data.role==='manager') {
     const create=document.createElement('button');create.id='create-account-button';create.className='btn ghost';create.textContent='＋ משתמש';
     create.onclick=()=>openUserForm('driver');top.append(create);
+    top.querySelector('#import-data-button')?.remove();
+    const importer=document.createElement('button');importer.id='import-data-button';importer.className='btn secondary';importer.textContent='↑ ייבוא נתונים';importer.onclick=importShuttleData;top.append(importer);
   }
   status('✓ מסונכרן עם השרת');
   if (localStorage.getItem(PENDING)) flush();
@@ -99,6 +101,38 @@ window.cloudSave=state=>{
   localStorage.setItem(PENDING,JSON.stringify(state));clearTimeout(saveTimer);
   saveTimer=setTimeout(flush,350);
 };
+
+async function importShuttleData(){
+  if(activeUser?.role!=='manager')return;
+  const picker=document.createElement('input');picker.type='file';picker.accept='.json,application/json';
+  picker.onchange=async()=>{
+    try{
+      const payload=JSON.parse(await picker.files[0].text());
+      if(payload.format!=='shuttle-desk-import-v1'||!Array.isArray(payload.passengers)||!Array.isArray(payload.trips)||!Array.isArray(payload.destinations))throw Error('קובץ ייבוא לא תקין');
+      const old=window.getShuttleState();
+      const next=structuredClone(old);
+      const importedPassengers=new Map();
+      for(const p of payload.passengers){
+        if(typeof p.id!=='string'||typeof p.name!=='string'||typeof p.address!=='string'||typeof p.phone!=='string')throw Error('רשומת נוסע לא תקינה');
+        let target=next.passengers.find(x=>x.id===p.id)||next.passengers.find(x=>x.name.trim()===p.name.trim() && (!p.phone||!x.phone||x.phone.replace(/\D/g,'')===p.phone.replace(/\D/g,'')));
+        if(!target){target={...p};next.passengers.push(target)}
+        importedPassengers.set(p.id,target.id);
+      }
+      for(const dest of payload.destinations){if(typeof dest!=='string')throw Error('יעד לא תקין');if(!next.destinations.includes(dest))next.destinations.push(dest)}
+      let added=0;
+      for(const trip of payload.trips){
+        if(typeof trip.id!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(trip.date)||!/^\d\d:\d\d$/.test(trip.time)||!Array.isArray(trip.passengerIds)||!['planned','complete'].includes(trip.status))throw Error('רשומת נסיעה לא תקינה');
+        if(next.trips.some(x=>x.id===trip.id))continue;
+        const matchDriver=next.drivers.find(d=>d.name.trim()===(trip.sourceDriver||'').trim());
+        next.trips.push({...trip,passengerIds:trip.passengerIds.map(id=>importedPassengers.get(id)).filter(Boolean),driverId:matchDriver?.id||null,ack:false});added++;
+      }
+      if(JSON.stringify(next).length>900000)throw Error('הקובץ גדול מדי');
+      if(!confirm(`לייבא ${payload.passengers.length} נוסעים ו-${added} נסיעות חדשות?\nהנתונים הקיימים יישמרו ונסיעות שכבר יובאו לא יוכפלו.`))return;
+      window.loadCloudState(next);window.cloudSave(next);status('⟳ הייבוא נשלח לשמירה');
+    }catch(e){alert('הייבוא נכשל: '+e.message)}
+  };
+  picker.click();
+}
 
 window.driverAction=async(id,action)=>{
   if(!activeUser||activeUser.role!=='driver')return;
