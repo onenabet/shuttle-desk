@@ -108,6 +108,29 @@ window.driverAction=async(id,action)=>{
   await loadState();
 };
 
+// The trip form selects passengers from the saved passenger directory.
+// Make an empty directory actionable and show the number selected.
+const originalOpenTrip=window.openTrip;
+window.openTrip=function(...args){
+  originalOpenTrip(...args);
+  const form=document.querySelector('#tripForm');
+  if(!form)return;
+  const list=form.querySelector('.checklist');
+  if(!list)return;
+  const boxes=[...list.querySelectorAll('input[name="passengerIds"]')];
+  if(!boxes.length){
+    list.innerHTML='<div style="padding:16px;text-align:center;color:#526e77">עדיין אין נוסעים ברשימה.<br>יש להוסיף נוסעים לפני יצירת נסיעה.<br><button type="button" class="btn secondary sm" style="margin-top:12px" id="add-first-passenger">＋ הוספת נוסע</button></div>';
+    list.querySelector('#add-first-passenger').onclick=()=>{window.closeModal();window.go('people')};
+    return;
+  }
+  const count=document.createElement('div');
+  count.style.cssText='font-weight:700;color:#137c85;margin-bottom:9px';
+  list.before(count);
+  const update=()=>{const number=boxes.filter(box=>box.checked).length;count.textContent=`נבחרו ${number} נוסעים מתוך ${boxes.length}`};
+  boxes.forEach(box=>box.addEventListener('change',update));
+  update();
+};
+
 function openUserForm(defaultRole='driver') {
   if(activeUser?.role!=='manager')return;
   const overlay=document.createElement('div');overlay.id='create-account-overlay';overlay.className='modalback';
