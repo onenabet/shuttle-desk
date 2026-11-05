@@ -166,6 +166,59 @@ window.driverAction=async(id,action)=>{
   await loadState();
 };
 
+// Confirm ride completion against the current server revision. Do not show a
+// completed ride until Supabase has actually saved the manager's approval.
+async function completeManagerTrip(id){
+  if(activeUser?.role!=='manager')return status('רק מנהל יכול לאשר ביצוע נסיעה',true);
+  if(saving||localStorage.getItem(PENDING)){
+    if(!saving)await flush();
+    if(saving||localStorage.getItem(PENDING)){
+      status('⚠ יש שינויים שטרם נשמרו. נסה שוב לאחר הסנכרון',true);
+      return;
+    }
+  }
+  status('⟳ מאשר ושומר את הנסיעה');
+  try{
+    for(let attempt=0;attempt<2;attempt++){
+      const {data:current,error:readError}=await supabase.rpc('read_shuttle_state');
+      if(readError||!current?.state)throw readError||new Error('לא ניתן לטעון את הנסיעות');
+      const trip=current.state.trips.find(item=>item.id===id);
+      if(!trip)throw new Error('הנסיעה לא נמצאה בשרת');
+      if(trip.status==='complete'){
+        revision=Number(current.revision);
+        window.loadCloudState(current.state);
+        window.closeModal();
+        status('✓ הנסיעה כבר מסומנת כבוצעה');
+        return;
+      }
+      if(!['planned','awaiting','no_show'].includes(trip.status))
+        throw new Error('לא ניתן לאשר נסיעה במצב הנוכחי');
+      trip.status='complete';
+      const {data:newRevision,error:saveError}=await supabase.rpc('save_shuttle_state',{
+        next_state:current.state,expected_revision:Number(current.revision)
+      });
+      if(saveError){
+        if(/Revision conflict/i.test(saveError.message||'')&&attempt===0)continue;
+        throw saveError;
+      }
+      revision=Number(newRevision);
+      window.loadCloudState(current.state);
+      window.closeModal();
+      status('✓ הנסיעה אושרה ונשמרה');
+      return;
+    }
+  }catch(error){
+    status('⚠ אישור הנסיעה לא נשמר',true);
+    alert('לא ניתן לאשר את הנסיעה: '+(error.message||'שגיאה בחיבור לשרת'));
+  }
+}
+
+const originalDoAction=window.doAction;
+window.doAction=function(id,action){
+  if(action==='approve'&&activeUser?.role==='manager')return completeManagerTrip(id);
+  return originalDoAction(id,action);
+};
+
 // A manager may complete a trip manually, even if it has not been assigned to a driver.
 // This is useful for historical trips imported from Excel.
 const originalTripDetails=window.tripDetails;
@@ -178,11 +231,11 @@ window.tripDetails=function(id){
   if(!footer)return;
   const complete=document.createElement('button');complete.className='btn';
   complete.textContent='✓ סמן כבוצעה';
-  complete.onclick=()=>{
+  complete.onclick=async()=>{
     const notice=trip.driverId?'לסמן את הנסיעה כבוצעה?':'לנסיעה אין נהג משובץ. בכל זאת לסמן אותה כבוצעה?';
     if(!confirm(notice))return;
-    trip.status='complete';window.closeModal();window.persistShuttle();
-    status('⟳ שומר אישור ביצוע');
+    complete.disabled=true;
+    try{await completeManagerTrip(id)}finally{complete.disabled=false}
   };
   footer.append(complete);
 };
