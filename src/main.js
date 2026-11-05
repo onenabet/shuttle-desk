@@ -7,7 +7,13 @@ const APP_CACHE = 'shuttle-desk-demo-v1';
 const PENDING = 'shuttle-pending-v2';
 // Authentication uses confirmed internal email aliases, never SMS.
 // Phone numbers remain the only identifiers shown to users.
-const phoneEmail=phone=>`p${phone.replace(/\D/g,'')}@shuttledesk.example.com`;
+const normalizePhone=phone=>{
+  const clean=String(phone||'').replace(/[\s()\-]/g,'');
+  if(/^05\d{8}$/.test(clean))return '+972'+clean.slice(1);
+  if(/^972\d{9}$/.test(clean))return '+'+clean;
+  return clean;
+};
+const phoneEmail=phone=>`p${normalizePhone(phone).replace(/\D/g,'')}@shuttledesk.example.com`;
 
 let activeUser = null;
 let revision = null;
@@ -29,7 +35,7 @@ function loginScreen(message='') {
   let box=document.querySelector('#login-ui');
   if (!box) {
     box=document.createElement('div');box.id='login-ui';
-    box.innerHTML=`<div class="login-card"><div class="login-logo">⇄</div><h1>ShuttleDesk</h1><p>התחברות למערכת ניהול ההסעות</p><form id="login-form"><label>מספר טלפון</label><input name="phone" type="tel" autocomplete="username" required placeholder="+972501234567" dir="ltr"><label>קוד אישי</label><input name="password" type="password" autocomplete="current-password" required minlength="6" placeholder="הקוד שקיבלת מהמנהל"><button type="submit">כניסה למערכת</button><div id="login-error" role="alert"></div></form><small>אין הרשמה עצמאית. המנהל יוצר חשבונות למשתמשים.</small></div>`;
+    box.innerHTML=`<div class="login-card"><div class="login-logo">⇄</div><h1>ShuttleDesk</h1><p>התחברות למערכת ניהול ההסעות</p><form id="login-form"><label>מספר טלפון</label><input name="phone" type="tel" autocomplete="username" required placeholder="0501234567 או +972501234567" dir="ltr"><label>קוד אישי</label><input name="password" type="password" autocomplete="current-password" required minlength="6" placeholder="הקוד שקיבלת מהמנהל"><button type="submit">כניסה למערכת</button><div id="login-error" role="alert"></div></form><small>אין הרשמה עצמאית. המנהל יוצר חשבונות למשתמשים.</small></div>`;
     let style=document.createElement('style');style.textContent=`body.auth-loading .app,body.auth-locked .app{display:none!important}#login-ui{position:fixed;inset:0;background:#f3f7f8;display:grid;place-items:center;padding:20px;font-family:Arial,sans-serif;direction:rtl}#login-ui .login-card{background:#fff;box-shadow:0 16px 50px #18323d13;padding:34px;border-radius:22px;width:min(410px,100%);text-align:center}#login-ui .login-logo{display:grid;place-items:center;background:#158c8e;color:#fff;width:58px;height:58px;margin:auto;border-radius:16px;font-size:32px}#login-ui h1{font-size:29px;margin:14px 0 6px;color:#173540}#login-ui p{color:#78909a;margin:0 0 28px}#login-ui form{display:grid;gap:10px;text-align:right}#login-ui label{font-weight:700;font-size:12px;color:#53717c}#login-ui input{padding:13px;border:1px solid #d5e1e5;border-radius:10px;font-size:16px}#login-ui button{background:#137c85;color:white;border:0;border-radius:10px;padding:14px;margin-top:12px;font-weight:bold}#login-ui small{display:block;color:#91a3ab;margin-top:24px}#login-error{min-height:18px;color:#ba4c43;text-align:center;font-size:12px}`;
     document.head.append(style);document.body.append(box);
     box.querySelector('#login-form').addEventListener('submit',login);
@@ -213,7 +219,7 @@ function openUserForm(defaultRole='driver') {
   overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
   overlay.querySelector('#account-form').onsubmit=async e=>{
     e.preventDefault();const form=e.currentTarget,button=form.querySelector('button[type=submit]');button.disabled=true;
-    const fields=Object.fromEntries(new FormData(form));fields.phone=fields.phone.replace(/[\s()-]/g,'');
+    const fields=Object.fromEntries(new FormData(form));fields.phone=normalizePhone(fields.phone);
     try {
       const send=async token=>fetch('/api/create-user',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(fields)});
       const {data:{session}}=await supabase.auth.getSession();
@@ -227,7 +233,7 @@ function openUserForm(defaultRole='driver') {
       const result=await response.json();if(!response.ok)throw new Error(result.error||'שגיאה ביצירת המשתמש');
       if(fields.role==='driver'){
         const state=window.getShuttleState();
-        if(!state.drivers.some(d=>d.id===result.id))state.drivers.push({id:result.id,name:fields.name,phone:fields.phone});
+        if(!state.drivers.some(d=>d.id===result.id))state.drivers.push({id:result.id,name:fields.name,phone:result.phone});
         // Link matching unassigned imported rides to the newly created driver.
         const newlyAssigned=state.trips.filter(t=>!t.driverId&&t.sourceDriver?.trim()===fields.name.trim()&&t.status==='planned');
         newlyAssigned.forEach(t=>{t.driverId=result.id;t.ack=false});
