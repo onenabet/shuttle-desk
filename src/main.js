@@ -166,6 +166,13 @@ window.driverAction=async(id,action)=>{
   await loadState();
 };
 
+// The modal closer is a top-level lexical variable in index.html, not a
+// property of window. Close the shared overlay directly from this module.
+function closeShuttleModal(){
+  const overlay=document.querySelector('#overlay');
+  if(overlay)overlay.replaceChildren();
+}
+
 // Confirm ride completion against the current server revision. Do not show a
 // completed ride until Supabase has actually saved the manager's approval.
 async function completeManagerTrip(id){
@@ -187,7 +194,7 @@ async function completeManagerTrip(id){
       if(trip.status==='complete'){
         revision=Number(current.revision);
         window.loadCloudState(current.state);
-        window.closeModal();
+        closeShuttleModal();
         status('✓ הנסיעה כבר מסומנת כבוצעה');
         return;
       }
@@ -203,7 +210,7 @@ async function completeManagerTrip(id){
       }
       revision=Number(newRevision);
       window.loadCloudState(current.state);
-      window.closeModal();
+      closeShuttleModal();
       status('✓ הנסיעה אושרה ונשמרה');
       return;
     }
@@ -252,7 +259,7 @@ window.openTrip=function(...args){
   const boxes=[...list.querySelectorAll('input[name="passengerIds"]')];
   if(!boxes.length){
     list.innerHTML='<div style="padding:16px;text-align:center;color:#526e77">עדיין אין נוסעים ברשימה.<br>יש להוסיף נוסעים לפני יצירת נסיעה.<br><button type="button" class="btn secondary sm" style="margin-top:12px" id="add-first-passenger">＋ הוספת נוסע</button></div>';
-    list.querySelector('#add-first-passenger').onclick=()=>{window.closeModal();window.go('people')};
+    list.querySelector('#add-first-passenger').onclick=()=>{closeShuttleModal();window.go('people')};
     return;
   }
   const count=document.createElement('div');
