@@ -65,10 +65,12 @@ async function loadState() {
   const top=document.querySelector('.topright');top.querySelector('#logout-button')?.remove();signout.id='logout-button';top.append(signout);
   top.querySelector('#create-account-button')?.remove();
   top.querySelector('#import-data-button')?.remove();
+  top.querySelector('#export-data-button')?.remove();
   if (data.role==='manager') {
     const create=document.createElement('button');create.id='create-account-button';create.className='btn ghost';create.textContent='＋ משתמש';
     create.onclick=()=>openUserForm('driver');top.append(create);
     const importer=document.createElement('button');importer.id='import-data-button';importer.className='btn secondary';importer.textContent='↑ ייבוא נתונים';importer.onclick=importShuttleData;top.append(importer);
+    const exporter=document.createElement('button');exporter.id='export-data-button';exporter.className='btn secondary';exporter.textContent='↓ ייצוא נתונים';exporter.onclick=exportShuttleData;top.append(exporter);
   }
   status('✓ מסונכרן עם השרת');
   if (localStorage.getItem(PENDING)) flush();
@@ -134,12 +136,49 @@ async function importShuttleData(){
   picker.click();
 }
 
+async function exportShuttleData(){
+  if(activeUser?.role!=='manager')return;
+  if(localStorage.getItem(PENDING))return alert('יש שינויים שטרם נשמרו בשרת. המתן לסנכרון ונסה שוב.');
+  const {data,error}=await supabase.rpc('read_shuttle_state');
+  if(error||!data?.state)return alert('לא ניתן לייצא כרגע. בדוק את החיבור לשרת.');
+  const payload={format:'shuttle-desk-import-v1',exportedAt:new Date().toISOString(),
+    drivers:data.state.drivers||[],passengers:data.state.passengers||[],
+    destinations:data.state.destinations||[],trips:data.state.trips||[]};
+  const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json;charset=utf-8'});
+  const link=document.createElement('a');link.href=URL.createObjectURL(blob);
+  link.download=`shuttle-desk-export-${new Date().toISOString().slice(0,10)}.json`;
+  document.body.append(link);link.click();link.remove();
+  setTimeout(()=>URL.revokeObjectURL(link.href),5000);
+  status('✓ קובץ הנתונים יוצא');
+}
+
 window.driverAction=async(id,action)=>{
   if(!activeUser||activeUser.role!=='driver')return;
   status('⟳ מעדכן סטטוס');
   const {error}=await supabase.rpc('driver_trip_action',{trip_id:id,action});
   if(error)status('⚠ הפעולה נכשלה, נא לרענן',true);
   await loadState();
+};
+
+// A manager may complete a trip manually, even if it has not been assigned to a driver.
+// This is useful for historical trips imported from Excel.
+const originalTripDetails=window.tripDetails;
+window.tripDetails=function(id){
+  originalTripDetails(id);
+  if(activeUser?.role!=='manager')return;
+  const trip=window.getShuttleState().trips.find(t=>t.id===id);
+  if(!trip||!['planned','no_show'].includes(trip.status))return;
+  const footer=document.querySelector('#overlay .modalfoot');
+  if(!footer)return;
+  const complete=document.createElement('button');complete.className='btn';
+  complete.textContent='✓ סמן כבוצעה';
+  complete.onclick=()=>{
+    const notice=trip.driverId?'לסמן את הנסיעה כבוצעה?':'לנסיעה אין נהג משובץ. בכל זאת לסמן אותה כבוצעה?';
+    if(!confirm(notice))return;
+    trip.status='complete';window.closeModal();window.persistShuttle();
+    status('⟳ שומר אישור ביצוע');
+  };
+  footer.append(complete);
 };
 
 // The trip form selects passengers from the saved passenger directory.
@@ -175,12 +214,24 @@ function openUserForm(defaultRole='driver') {
   overlay.querySelector('#account-form').onsubmit=async e=>{
     e.preventDefault();const form=e.currentTarget,button=form.querySelector('button[type=submit]');button.disabled=true;
     const fields=Object.fromEntries(new FormData(form));fields.phone=fields.phone.replace(/[\s()-]/g,'');
-    const {data:{session}}=await supabase.auth.getSession();
     try {
-      const response=await fetch('/api/create-user',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify(fields)});
+      const send=async token=>fetch('/api/create-user',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(fields)});
+      const {data:{session}}=await supabase.auth.getSession();
+      if(!session?.access_token)throw new Error('פג תוקף ההתחברות. צא והתחבר מחדש.');
+      let response=await send(session.access_token);
+      if(response.status===401){
+        const {data:refreshed,error:refreshError}=await supabase.auth.refreshSession();
+        if(refreshError||!refreshed.session?.access_token)throw new Error('ההתחברות פגה. צא והתחבר מחדש.');
+        response=await send(refreshed.session.access_token);
+      }
       const result=await response.json();if(!response.ok)throw new Error(result.error||'שגיאה ביצירת המשתמש');
       if(fields.role==='driver'){
-        const state=window.getShuttleState();state.drivers.push({id:result.id,name:fields.name,phone:fields.phone});window.persistShuttle();
+        const state=window.getShuttleState();
+        if(!state.drivers.some(d=>d.id===result.id))state.drivers.push({id:result.id,name:fields.name,phone:fields.phone});
+        // Link matching unassigned imported rides to the newly created driver.
+        const newlyAssigned=state.trips.filter(t=>!t.driverId&&t.sourceDriver?.trim()===fields.name.trim()&&t.status==='planned');
+        newlyAssigned.forEach(t=>{t.driverId=result.id;t.ack=false});
+        window.persistShuttle();
       }
       close();status('✓ המשתמש נוצר');
     }catch(err){overlay.querySelector('#account-error').textContent=err.message;button.disabled=false}

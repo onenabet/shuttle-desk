@@ -3,14 +3,16 @@ import { createClient } from '@supabase/supabase-js';
 const json = (body,status=200)=>new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
 
 export async function onRequestPost({request,env}) {
-  if (!env.SUPABASE_SECRET_KEY || !env.SUPABASE_URL) return json({error:'Server setup incomplete'},503);
-  const token=(request.headers.get('Authorization')||'').replace(/^Bearer /i,'');
+  if (!env.SUPABASE_SECRET_KEY || !env.SUPABASE_URL) return json({error:'הגדרות השרת חסרות'},503);
+  const token=(request.headers.get('Authorization')||'').replace(/^Bearer\s+/i,'').trim();
   if(!token)return json({error:'Unauthorized'},401);
-  const publicClient=createClient(env.SUPABASE_URL,env.SUPABASE_PUBLISHABLE_KEY);
   const admin=createClient(env.SUPABASE_URL,env.SUPABASE_SECRET_KEY,{auth:{autoRefreshToken:false,persistSession:false}});
-  const {data:{user},error:authError}=await publicClient.auth.getUser(token);
+  // Verify the caller's access token against Supabase Auth using server-side credentials.
+  // This does not depend on an optional publishable-key runtime binding.
+  const {data:{user},error:authError}=await admin.auth.getUser(token);
   if(authError||!user)return json({error:'Unauthorized'},401);
-  const {data:manager}=await admin.from('app_profiles').select('role,active').eq('id',user.id).maybeSingle();
+  const {data:manager,error:profileLookupError}=await admin.from('app_profiles').select('role,active').eq('id',user.id).maybeSingle();
+  if(profileLookupError)return json({error:'שגיאה בבדיקת הרשאות'},500);
   if(manager?.role!=='manager'||!manager.active)return json({error:'Forbidden'},403);
   let input;
   try {input=await request.json()} catch{return json({error:'Invalid JSON'},400)}
